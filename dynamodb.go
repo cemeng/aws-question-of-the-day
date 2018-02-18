@@ -10,11 +10,18 @@ import (
 	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/aws/aws-sdk-go/service/ses"
 	"log"
+	"math/rand"
+	"strconv"
+	"time"
 )
 
 var (
 	ErrNameNotProvided = errors.New("no name was provided in the HTTP body")
 	ErrRetrievingItem  = errors.New("error retrieving item")
+)
+
+const (
+	TableName = "aws-questions"
 )
 
 type Item struct {
@@ -23,15 +30,16 @@ type Item struct {
 }
 
 func main() {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String("ap-southeast-2")},
-	)
+	sess, err := session.NewSession(&aws.Config{Region: aws.String("ap-southeast-2")})
 	svc := dynamodb.New(sess)
+
+	pickedIndex := getRandomRecordId(svc)
+
 	result, err := svc.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String("aws-questions"),
+		TableName: aws.String(TableName),
 		Key: map[string]*dynamodb.AttributeValue{
 			"questionId": {
-				N: aws.String("1"),
+				N: aws.String(strconv.Itoa(pickedIndex)),
 			},
 		},
 	})
@@ -42,14 +50,25 @@ func main() {
 
 	item := Item{}
 	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
-	fmt.Println(item.Question)
-	fmt.Println(item.Answer)
 
 	mailResult, mailError := sendEmail(item)
 	if mailError != nil {
 		fmt.Println(mailError.Error())
 	}
 	fmt.Println(mailResult)
+}
+
+func getRandomRecordId(svc *dynamodb.DynamoDB) int {
+	input := &dynamodb.ScanInput{
+		TableName: aws.String(TableName),
+		Select:    aws.String("COUNT"),
+	}
+	// should handle error
+	scanResult, _ := svc.Scan(input)
+
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	return r1.Intn(int(*scanResult.Count)) + 1
 }
 
 func sendEmail(item Item) (bool, error) {
