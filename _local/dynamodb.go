@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -15,13 +14,11 @@ import (
 	"time"
 )
 
-var (
-	ErrNameNotProvided = errors.New("no name was provided in the HTTP body")
-	ErrRetrievingItem  = errors.New("error retrieving item")
-)
-
 const (
 	TableName = "aws-questions"
+	Sender    = "cemeng@gmail.com"
+	Recipient = "cemeng@gmail.com"
+	Subject   = "AWS Question"
 )
 
 type Item struct {
@@ -72,12 +69,6 @@ func getRandomRecordId(svc *dynamodb.DynamoDB) int {
 }
 
 func sendEmail(item Item) (bool, error) {
-	const (
-		Sender    = "cemeng@gmail.com"
-		Recipient = "cemeng@gmail.com"
-		Subject   = "AWS Question"
-	)
-
 	var HtmlBody = "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p>"
 
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
