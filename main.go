@@ -37,7 +37,15 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("ap-southeast-2")})
 	svc := dynamodb.New(sess)
 
-	pickedIndex := getRandomRecordId(svc)
+	pickedIndex, pickIndexError := getRandomRecordId(svc)
+
+	if pickIndexError != nil {
+		fmt.Println(pickIndexError.Error())
+		return events.APIGatewayProxyResponse{
+			Body:       pickIndexError.Error(),
+			StatusCode: 500,
+		}, nil
+	}
 
 	result, err := svc.GetItem(&dynamodb.GetItemInput{
 		TableName: aws.String("aws-questions"),
@@ -75,17 +83,21 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 
 }
 
-func getRandomRecordId(svc *dynamodb.DynamoDB) int {
+func getRandomRecordId(svc *dynamodb.DynamoDB) (int, error) {
 	input := &dynamodb.ScanInput{
 		TableName: aws.String(TableName),
 		Select:    aws.String("COUNT"),
 	}
-	// FIXME: error is not handled
-	scanResult, _ := svc.Scan(input)
+	scanResult, err := svc.Scan(input)
+
+	if err != nil {
+		log.Printf("Error getting count dynamoDB", err.Error())
+		return 0, err
+	}
 
 	s1 := rand.NewSource(time.Now().UnixNano())
 	r1 := rand.New(s1)
-	return r1.Intn(int(*scanResult.Count)) + 1
+	return (r1.Intn(int(*scanResult.Count)) + 1), nil
 }
 
 func sendEmail(item Item) (bool, error) {
