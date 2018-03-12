@@ -50,10 +50,7 @@ func main() {
 			},
 		},
 	}
-
 	result, err := svc.BatchGetItem(input)
-
-	fmt.Println(err)
 
 	if err != nil {
 		log.Printf("Error retrieving from dynamoDB", err.Error())
