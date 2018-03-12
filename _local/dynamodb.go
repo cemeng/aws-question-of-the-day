@@ -29,47 +29,76 @@ type Item struct {
 func main() {
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("ap-southeast-2")})
 	svc := dynamodb.New(sess)
+	numberOfRecords := getNumberOfRecords(svc)
 
-	pickedIndex := getRandomRecordId(svc)
-
-	result, err := svc.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(TableName),
-		Key: map[string]*dynamodb.AttributeValue{
-			"questionId": {
-				N: aws.String(strconv.Itoa(pickedIndex)),
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"aws-questions": {
+				Keys: []map[string]*dynamodb.AttributeValue{
+					{
+						"questionId": &dynamodb.AttributeValue{
+							N: aws.String(strconv.Itoa(getRandomRecordID(numberOfRecords))),
+						},
+					},
+					{
+						"questionId": &dynamodb.AttributeValue{
+							N: aws.String(strconv.Itoa(getRandomRecordID(numberOfRecords))),
+						},
+					},
+				},
+				ProjectionExpression: aws.String("question, answer"),
 			},
 		},
-	})
+	}
+
+	result, err := svc.BatchGetItem(input)
+
+	fmt.Println(err)
 
 	if err != nil {
 		log.Printf("Error retrieving from dynamoDB", err.Error())
 	}
 
-	item := Item{}
-	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
+	var items [2]Item
+	for index, element := range result.Responses["aws-questions"] {
+		item := Item{}
+		err = dynamodbattribute.UnmarshalMap(element, &item)
+		if err == nil {
+			items[index] = item
+		} else {
+			fmt.Println(err)
+		}
+	}
 
-	mailResult, mailError := sendEmail(item)
+	mailResult, mailError := sendEmail(items)
 	if mailError != nil {
 		fmt.Println(mailError.Error())
 	}
 	fmt.Println(mailResult)
 }
 
-func getRandomRecordId(svc *dynamodb.DynamoDB) int {
+func getNumberOfRecords(svc *dynamodb.DynamoDB) int {
 	input := &dynamodb.ScanInput{
 		TableName: aws.String(TableName),
 		Select:    aws.String("COUNT"),
 	}
-	// should handle error
 	scanResult, _ := svc.Scan(input)
 
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	return r1.Intn(int(*scanResult.Count)) + 1
+	return int(*scanResult.Count)
 }
 
-func sendEmail(item Item) (bool, error) {
-	var HtmlBody = "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p>"
+func getRandomRecordID(numberOfRecords int) int {
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	return r1.Intn(numberOfRecords) + 1
+}
+
+func sendEmail(items [2]Item) (bool, error) {
+	HTMLBody := ""
+
+	for _, item := range items {
+		HTMLBody += "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p><p>====</p>"
+	}
 
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
 
@@ -84,7 +113,7 @@ func sendEmail(item Item) (bool, error) {
 		Message: &ses.Message{
 			Body: &ses.Body{
 				Html: &ses.Content{
-					Data: aws.String(HtmlBody),
+					Data: aws.String(HTMLBody),
 				},
 			},
 			Subject: &ses.Content{
