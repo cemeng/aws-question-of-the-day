@@ -17,18 +17,20 @@ import (
 	"time"
 )
 
+// Item is a combination of Question and Answer
 type Item struct {
 	Question string `json:"question"`
 	Answer   string `json:"answer"`
 }
 
 const (
-	TableName = "aws-questions"
-	Sender    = "cemeng@gmail.com"
-	Recipient = "cemeng@gmail.com"
-	Subject   = "AWS Question"
+	tableName = "aws-questions"
+	sender    = "cemeng@gmail.com"
+	recipient = "cemeng@gmail.com"
+	subject   = "AWS Question"
 )
 
+// Handler function for lambda
 func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 	// TODO: workout cloudwatch logs
 	// stdout and stderr are sent to AWS CloudWatch Logs
@@ -36,25 +38,36 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("ap-southeast-2")})
 	svc := dynamodb.New(sess)
+	numberOfRecords, numberOfRecordsErr := getNumberOfRecords(svc)
 
-	pickedIndex, pickIndexError := getRandomRecordId(svc)
-
-	if pickIndexError != nil {
-		fmt.Println(pickIndexError.Error())
+	if numberOfRecordsErr != nil {
+		fmt.Println(numberOfRecordsErr.Error())
 		return events.APIGatewayProxyResponse{
-			Body:       pickIndexError.Error(),
+			Body:       numberOfRecordsErr.Error(),
 			StatusCode: 500,
 		}, nil
 	}
 
-	result, err := svc.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String("aws-questions"),
-		Key: map[string]*dynamodb.AttributeValue{
-			"questionId": {
-				N: aws.String(strconv.Itoa(pickedIndex)),
+	input := &dynamodb.BatchGetItemInput{
+		RequestItems: map[string]*dynamodb.KeysAndAttributes{
+			"aws-questions": {
+				Keys: []map[string]*dynamodb.AttributeValue{
+					{
+						"questionId": &dynamodb.AttributeValue{
+							N: aws.String(strconv.Itoa(getRandomRecordID(numberOfRecords))),
+						},
+					},
+					{
+						"questionId": &dynamodb.AttributeValue{
+							N: aws.String(strconv.Itoa(getRandomRecordID(numberOfRecords))),
+						},
+					},
+				},
+				ProjectionExpression: aws.String("question, answer"),
 			},
 		},
-	})
+	}
+	result, err := svc.BatchGetItem(input)
 
 	if err != nil {
 		log.Printf("Error retrieving from dynamoDB", err.Error())
@@ -62,10 +75,18 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 		return events.APIGatewayProxyResponse{}, ErrRetrievingItem
 	}
 
-	item := Item{}
-	err = dynamodbattribute.UnmarshalMap(result.Item, &item)
+	var items [2]Item
+	for index, element := range result.Responses["aws-questions"] {
+		item := Item{}
+		err = dynamodbattribute.UnmarshalMap(element, &item)
+		if err == nil {
+			items[index] = item
+		} else {
+			fmt.Println(err)
+		}
+	}
 
-	mailResult, mailError := sendEmail(item)
+	mailResult, mailError := sendEmail(items)
 	// FIXME: use mailResult
 	fmt.Println(mailResult)
 	if mailError != nil {
@@ -83,46 +104,52 @@ func Handler(request events.APIGatewayProxyRequest) (events.APIGatewayProxyRespo
 
 }
 
-func getRandomRecordId(svc *dynamodb.DynamoDB) (int, error) {
+func getNumberOfRecords(svc *dynamodb.DynamoDB) (int, error) {
 	input := &dynamodb.ScanInput{
-		TableName: aws.String(TableName),
+		TableName: aws.String(tableName),
 		Select:    aws.String("COUNT"),
 	}
 	scanResult, err := svc.Scan(input)
 
 	if err != nil {
-		log.Printf("Error getting count dynamoDB", err.Error())
 		return 0, err
 	}
-
-	s1 := rand.NewSource(time.Now().UnixNano())
-	r1 := rand.New(s1)
-	return (r1.Intn(int(*scanResult.Count)) + 1), nil
+	return int(*scanResult.Count), nil
 }
 
-func sendEmail(item Item) (bool, error) {
+func getRandomRecordID(numberOfRecords int) int {
+	s1 := rand.NewSource(time.Now().UnixNano())
+	r1 := rand.New(s1)
+	return r1.Intn(numberOfRecords) + 1
+}
+
+func sendEmail(items [2]Item) (bool, error) {
+	HTMLBody := ""
+	for _, item := range items {
+		HTMLBody += "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p><p>====</p>"
+	}
+
 	// no SES service in ap-southeast-2, hence using us-east-1
 	sess, err := session.NewSession(&aws.Config{Region: aws.String("us-east-1")})
 	svc := ses.New(sess)
-	HtmlBody := "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p>"
 
 	input := &ses.SendEmailInput{
 		Destination: &ses.Destination{
 			ToAddresses: []*string{
-				aws.String(Recipient),
+				aws.String(recipient),
 			},
 		},
 		Message: &ses.Message{
 			Body: &ses.Body{
 				Html: &ses.Content{
-					Data: aws.String(HtmlBody),
+					Data: aws.String(HTMLBody),
 				},
 			},
 			Subject: &ses.Content{
-				Data: aws.String(Subject),
+				Data: aws.String(subject),
 			},
 		},
-		Source: aws.String(Sender),
+		Source: aws.String(sender),
 	}
 
 	result, err := svc.SendEmail(input)

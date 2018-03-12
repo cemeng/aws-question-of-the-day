@@ -92,7 +92,6 @@ func getRandomRecordID(numberOfRecords int) int {
 
 func sendEmail(items [2]Item) (bool, error) {
 	HTMLBody := ""
-
 	for _, item := range items {
 		HTMLBody += "<b>Question: </b><p>" + item.Question + "</p> <b>Answer:</b><p>" + item.Answer + "</p><p>====</p>"
 	}
